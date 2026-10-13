@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
+import { authService } from "../services/authService";
 import {
   UtensilsCrossed,
   Building2,
@@ -96,12 +97,16 @@ export default function AuthPage({ mode: initialMode = "login" }) {
   const [errors, setErrors] = useState({});
   const [submitted, setSubmitted] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  const [apiError, setApiError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [loggedInRole, setLoggedInRole] = useState("hotel");
 
   const update = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   function validate() {
     const e = {};
     if (mode === "signup" && !form.name.trim()) e.name = "Enter your full name";
+    if (mode === "signup" && !form.phone.trim()) e.phone = "Enter your phone number";
     if (!form.email.trim()) e.email = "Enter your email";
     else if (!validateEmail(form.email)) e.email = "Enter a valid email address";
     if (mode !== "forgot") {
@@ -113,19 +118,42 @@ export default function AuthPage({ mode: initialMode = "login" }) {
     return Object.keys(e).length === 0;
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
     if (!validate()) return;
-    if (mode === "forgot") {
-      setResetSent(true);
-      return;
+    setApiError("");
+    setLoading(true);
+    try {
+      if (mode === "forgot") {
+        await authService.forgotPassword(form.email);
+        setResetSent(true);
+        return;
+      }
+      const res =
+        mode === "signup"
+          ? await authService.signup({
+              name: form.name,
+              email: form.email,
+              phone: form.phone,
+              password: form.password,
+              role: role.toUpperCase(), // HOTEL | ORPHANAGE | VOLUNTEER
+            })
+          : await authService.login({ email: form.email, password: form.password });
+
+      auth.login(res.token, res.user);
+      setLoggedInRole(res.user.role.toLowerCase());
+      setSubmitted(true);
+    } catch (err) {
+      setApiError(err.message);
+    } finally {
+      setLoading(false);
     }
-    setSubmitted(true);
   }
 
   function switchMode(next) {
     setMode(next);
     setErrors({});
+    setApiError("");
     setSubmitted(false);
     setResetSent(false);
   }
@@ -337,7 +365,8 @@ export default function AuthPage({ mode: initialMode = "login" }) {
                     <Field icon={Mail} error={errors.email}>
                       <input type="email" placeholder="you@hotel.com" value={form.email} onChange={update("email")} autoComplete="email" />
                     </Field>
-                    <button type="submit" className="btn btn-primary">Send reset link</button>
+                    {apiError && <div className="field-error" role="alert">{apiError}</div>}
+                    <button type="submit" className="btn btn-primary" disabled={loading}>{loading ? "Sending…" : "Send reset link"}</button>
                   </form>
                 </div>
               )
@@ -350,7 +379,7 @@ export default function AuthPage({ mode: initialMode = "login" }) {
                     ? `Your ${ROLES.find((r) => r.id === role).label.toLowerCase()} account is ready. Verification usually takes under a day.`
                     : "You're signed in. Redirecting you to your dashboard."}
                 </p>
-                <button className="btn btn-primary" onClick={() => { auth.login(role, form.name); navigate(`/dashboard/${role}`); }}>Continue to dashboard</button>
+                <button className="btn btn-primary" onClick={() => navigate(`/dashboard/${loggedInRole}`)}>Continue to dashboard</button>
               </div>
             ) : (
               <div className="form-fade" key={mode}>
@@ -358,14 +387,6 @@ export default function AuthPage({ mode: initialMode = "login" }) {
                 <p className="auth-sub">
                   {mode === "signup" ? "Tell us who you are and let's get you verified." : "Log in to manage donations and pickups."}
                 </p>
-
-                {mode === "login" && (
-                  <Field icon={User}>
-                    <select value={role} onChange={(e) => setRole(e.target.value)} style={{ border: "none", outline: "none", background: "transparent", padding: "13px 0", fontSize: "14.5px", color: "var(--ink)", width: "100%" }}>
-                      {ROLES.map((r) => <option key={r.id} value={r.id}>Log in as {r.label}</option>)}
-                    </select>
-                  </Field>
-                )}
 
                 {mode === "signup" && (
                   <div className="role-grid">
@@ -426,8 +447,9 @@ export default function AuthPage({ mode: initialMode = "login" }) {
                     </div>
                   )}
 
-                  <button type="submit" className="btn btn-primary">
-                    {mode === "signup" ? "Create account" : "Log in"} <ArrowRight size={16} />
+                  {apiError && <div className="field-error" role="alert" style={{ marginTop: -4 }}>{apiError}</div>}
+                  <button type="submit" className="btn btn-primary" disabled={loading}>
+                    {loading ? "Please wait…" : mode === "signup" ? "Create account" : "Log in"} <ArrowRight size={16} />
                   </button>
                 </form>
 
